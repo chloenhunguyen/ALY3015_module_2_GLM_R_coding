@@ -1,0 +1,233 @@
+---
+title: "Assignment 2 - GLM Based Multiple Linear Regression"
+author: "Huynh Nguyen"
+date: "2026-09-24"
+output:
+  word_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 7,
+  fig.height = 5
+)
+
+library(readr)
+library(dplyr)
+library(knitr)
+```
+
+# 1. Introduction
+
+The goal of this assignment is to build a generalized linear model (GLM) to predict **SalePrice** in the Ames Housing dataset. I also compare this model with the multiple linear regression model from Assignment 1. To make the comparison fair, I use the same response variable, the same predictors, and the same data-cleaning steps.
+
+Since **SalePrice** is a continuous number, I use a **Gaussian family with an identity link**. In this case, the GLM works very similarly to a regular multiple linear regression model.
+
+# 2. Data Preparation
+
+```{r data-import}
+# Put AmesHousing.csv in the same folder as this Rmd file.
+AmesHousing <- read_csv("AmesHousing.csv", show_col_types = FALSE)
+
+# Convert names such as "Overall Qual" to "Overall.Qual".
+names(AmesHousing) <- make.names(names(AmesHousing))
+
+variables <- c(
+  "SalePrice",
+  "Overall.Qual",
+  "Gr.Liv.Area",
+  "Total.Bsmt.SF",
+  "Garage.Cars",
+  "Year.Built",
+  "Full.Bath",
+  "Fireplaces",
+  "Neighborhood",
+  "Kitchen.Qual"
+)
+
+data_model <- AmesHousing[, variables]
+
+# Remove incomplete cases, matching Assignment 1.
+n_before <- nrow(data_model)
+data_model <- na.omit(data_model)
+n_after <- nrow(data_model)
+
+# Treat qualitative variables as factors.
+data_model$Neighborhood <- as.factor(data_model$Neighborhood)
+data_model$Kitchen.Qual <- as.factor(data_model$Kitchen.Qual)
+
+cat("Observations before removing incomplete cases:", n_before, "\n")
+cat("Observations used in the model:", n_after, "\n")
+cat("Observations removed:", n_before - n_after, "\n")
+```
+
+The original dataset has 2,930 observations. Just like in Assignment 1, two rows have missing values in the variables I selected, so I remove them. This leaves 2,928 observations for the model. I also change **Neighborhood** and **Kitchen.Qual** into factors because they are categorical variables. R will then create separate indicator variables for their categories.
+
+# 3. GLM Model Specification
+
+The same predictors from Assignment 1 are retained:
+
+- Overall quality
+- Above-ground living area
+- Total basement area
+- Garage capacity
+- Year built
+- Number of full bathrooms
+- Number of fireplaces
+- Neighborhood
+- Kitchen quality
+
+The GLM is fitted using the Gaussian distribution and identity link:
+
+```{r glm-model}
+glm_model <- glm(
+  SalePrice ~
+    Overall.Qual +
+    Gr.Liv.Area +
+    Total.Bsmt.SF +
+    Garage.Cars +
+    Year.Built +
+    Full.Bath +
+    Fireplaces +
+    Neighborhood +
+    Kitchen.Qual,
+  data = data_model,
+  family = gaussian(link = "identity")
+)
+
+glm_summary <- summary(glm_model)
+glm_summary
+```
+
+I use the Gaussian family because **SalePrice** is a continuous variable. The identity link means the model predicts SalePrice directly from the predictors using a linear relationship.
+
+# 4. GLM Results
+
+## 4.1 Coefficients and Statistical Significance
+
+```{r coefficient-table}
+glm_coef <- summary(glm_model)$coefficients
+
+coef_report <- data.frame(
+  Term = rownames(glm_coef),
+  Estimate = round(glm_coef[, "Estimate"], 3),
+  Std_Error = round(glm_coef[, "Std. Error"], 3),
+  t_value = round(glm_coef[, "t value"], 3),
+  p_value = signif(glm_coef[, "Pr(>|t|)"], 4),
+  Significant_0.05 = ifelse(glm_coef[, "Pr(>|t|)"] < 0.05, "Yes", "No"),
+  row.names = NULL
+)
+
+knitr::kable(coef_report, caption = "Gaussian GLM coefficient estimates")
+```
+
+Because I use the identity link, the coefficients can be explained in the same way as regular multiple linear regression. If the other variables stay the same:
+
+- A one-point increase in **Overall.Qual** is associated with an estimated increase of approximately **$12,462** in SalePrice.
+- One additional square foot of **Gr.Liv.Area** is associated with approximately **$42.64** higher SalePrice.
+- One additional unit of **Garage.Cars** capacity is associated with approximately **$10,621** higher SalePrice.
+- **Full.Bath** is not statistically significant at the 5% level in the fitted model, while several other quantitative predictors are statistically significant.
+
+For **Neighborhood** and **Kitchen.Qual**, each coefficient shows how that category is different from the reference category while the other variables stay the same.
+
+## 4.2 Model Fit
+
+```{r model-fit}
+null_deviance <- glm_model$null.deviance
+residual_deviance <- glm_model$deviance
+pseudo_r2 <- 1 - residual_deviance / null_deviance
+model_aic <- AIC(glm_model)
+
+fit_table <- data.frame(
+  Statistic = c("Null deviance", "Residual deviance", "Deviance-based R-squared", "AIC"),
+  Value = c(null_deviance, residual_deviance, pseudo_r2, model_aic)
+)
+
+knitr::kable(fit_table, digits = 4, caption = "GLM model-fit statistics")
+```
+
+The residual deviance is much smaller than the null deviance. This means the model fits the data better after adding the predictors. The deviance-based R-squared is about **0.847**, which is the same as the R-squared from Assignment 1. In simple terms, the model explains about **84.7% of the differences in SalePrice** in this dataset.
+
+# 5. Model Diagnostics
+
+```{r diagnostics, fig.width=7, fig.height=7}
+par(mfrow = c(2, 2))
+plot(glm_model)
+par(mfrow = c(1, 1))
+```
+
+I use the diagnostic plots to check whether the model has any important problems. In the residuals-versus-fitted plot, I want to see points spread around zero without a clear pattern. The Q-Q plot helps me check whether the residuals are close to a normal distribution. Similar to Assignment 1, some points in the tails are far from the line, so the residuals are not perfectly normal. There are also a few large residuals, which may represent unusual or expensive houses. Even with these issues, the model still explains a large amount of the variation in SalePrice.
+
+# 6. Comparison with Assignment 1
+
+To make a direct comparison, the Assignment 1 ordinary least squares model is fitted again using exactly the same data and predictors.
+
+```{r lm-comparison}
+lm_model <- lm(
+  SalePrice ~
+    Overall.Qual +
+    Gr.Liv.Area +
+    Total.Bsmt.SF +
+    Garage.Cars +
+    Year.Built +
+    Full.Bath +
+    Fireplaces +
+    Neighborhood +
+    Kitchen.Qual,
+  data = data_model
+)
+
+comparison_table <- data.frame(
+  Statistic = c(
+    "Overall.Qual coefficient",
+    "Gr.Liv.Area coefficient",
+    "Garage.Cars coefficient",
+    "Full.Bath p-value",
+    "Residual deviance / RSS",
+    "AIC"
+  ),
+  Assignment_1_LM = c(
+    coef(lm_model)["Overall.Qual"],
+    coef(lm_model)["Gr.Liv.Area"],
+    coef(lm_model)["Garage.Cars"],
+    summary(lm_model)$coefficients["Full.Bath", "Pr(>|t|)"],
+    deviance(lm_model),
+    AIC(lm_model)
+  ),
+  Assignment_2_GLM = c(
+    coef(glm_model)["Overall.Qual"],
+    coef(glm_model)["Gr.Liv.Area"],
+    coef(glm_model)["Garage.Cars"],
+    summary(glm_model)$coefficients["Full.Bath", "Pr(>|t|)"],
+    deviance(glm_model),
+    AIC(glm_model)
+  )
+)
+
+knitr::kable(comparison_table, digits = 4,
+             caption = "Comparison of Assignment 1 LM and Assignment 2 Gaussian GLM")
+
+# Check whether fitted values and coefficients are effectively identical.
+cat("Maximum absolute coefficient difference:",
+    max(abs(coef(lm_model) - coef(glm_model))), "\n")
+cat("Maximum absolute fitted-value difference:",
+    max(abs(fitted(lm_model) - fitted(glm_model))), "\n")
+```
+
+The Gaussian GLM with an identity link gives almost the same results as the multiple linear regression model from Assignment 1. The coefficients, fitted values, residuals, p-values, and model fit are the same except for very small rounding differences.
+
+This happens because a regular linear regression model is actually a special type of GLM. When the GLM uses a Gaussian distribution and an identity link, it becomes the same type of model as ordinary linear regression. Because of that, the main difference between Assignment 1 and Assignment 2 is **how the model is set up**, not the final results.
+
+GLM is a broader framework because it can also be used for other types of response variables. For example, it can be used for yes/no outcomes or count data. In this assignment, since SalePrice is continuous, the Gaussian GLM gives the same result as the linear regression model.
+
+# 7. Conclusion
+
+In this assignment, I used a Gaussian GLM with an identity link to predict SalePrice using the same variables from Assignment 1. Most of the predictors are useful for explaining SalePrice, while **Full.Bath** is not statistically significant after the other variables are included in the model.
+
+The model explains about **84.7%** of the variation in SalePrice. The diagnostic plots show that the model works well overall, but there are still a few unusual observations and some non-normal behavior in the tails.
+
+The most important result is that **the GLM and the linear regression model from Assignment 1 give almost exactly the same answer**. This makes sense because a Gaussian GLM with an identity link is the same basic model as ordinary linear regression. This assignment helped show how linear regression is part of the larger GLM framework.
